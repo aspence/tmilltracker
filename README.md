@@ -8,7 +8,7 @@ If you use this code please cite:
     Spence, A. J., Nicholson-Thomas, G., and Lampe, R. (2013). 
     "Closing the loop in legged neuromechanics: an open-source computer 
     vision controlled treadmill." Journal of Neuroscience Methods.
-    (http://dx.doi.org/10.1016/j.jneumeth.2013.03.009)
+    [http://dx.doi.org/10.1016/j.jneumeth.2013.03.009](http://dx.doi.org/10.1016/j.jneumeth.2013.03.009)
 
 Spence, A.J., Nicholson-Thomas, G., Lampe, R. Closing the loop in legged neuromechanics: an open-source computer vision controlled treadmill.
 
