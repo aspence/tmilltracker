@@ -5,9 +5,10 @@ A computer vision controlled treadmill system
 
 If you use this code please cite:
 
-    Spence, A. J., Nicholson-Thomas, G., and Lampe, R. (2013). 
+    Spence, A. J., Nicholson-Thomas, G., and Lampe, R.
     "Closing the loop in legged neuromechanics: an open-source computer 
-    vision controlled treadmill." Journal of Neuroscience Methods.
+    vision controlled treadmill."
+    Journal of Neuroscience Methods (2013) 215 (2): 164Ð169. 15 May 2013.
     http://dx.doi.org/10.1016/j.jneumeth.2013.03.009
 
 Link to paper here:
