@@ -37,6 +37,7 @@ Use slower 12Hz OpenCV highgui for acuisition (does not require import of motmot
 
 Use a directory full of png images of following format fr00001_20130215_154312p232123.png for video stream:
     python tmilltracker.py -I --imgs ~/mydirectory/fr20130206_165921p382628/
+    python tmilltracker.py -I --imgs '/Users/aspence/Documents/work/treadmill/harriet/30hz mouse with without overlay/fr20130205_115303p154501_noover'
 '''
 
 import numpy as np, matplotlib as mpl, pylab as pl
@@ -151,8 +152,9 @@ class TmillTracker():
     This class handles the majority of tracking the animal and controlling the
     treadmill.
     '''
-    def __init__(self, haveserial=True, noci=False, imgs="" ):
+    def __init__(self, haveserial=True, noci=False, imgs="",debug=False ):
         # Store options
+        self.debug=debug
         self.host = 'crunch2' #remote host
         self.port = 50002 # must match open port on host        
         self.useci = not noci
@@ -212,6 +214,7 @@ class TmillTracker():
         self.startBehavior = -1
         self.endBehavior = -1
         self.animspd = 0.0
+        self.invert = False
         # Give lastgoodtracktime a value because np.nan implies have a good track.
         # Setting to a time will cause slowdown if we have no track.
         self.lastgoodtracktime = time.time()
@@ -237,14 +240,14 @@ class TmillTracker():
 --- 0-9           - Set treadmill speed 0 - 90 cm/s
 --- C             - Calibrate length scale
 --- a             - Calibrate animal size ellipse
---- m             - Measure and set ellipse area
+--- M             - Measure and set ellipse area
 --- n             - Set animal ID number
 --- N             - Input notes string for trial
 --- T             - Set trial number
 --- l             - Toggle data logging (autostarts with feedback mode)
 ---               - Toggle belt speed polling (not implemented yet)
 ---               - Toggle digital trigger time stamp (req AD board and comedi) (not implemented)
---- t             - Toggle video tracking of animal
+--- t             - Toggle video tracking of animal (number keys 0-9 work to manually set belt speed)
 --- f             - Toggle belt feedback control mode
 --- V             - Log video to file
 --- F             - Log video Frames
@@ -254,6 +257,7 @@ class TmillTracker():
 --- O             - Toggle Overlay on images on screen and disk: speed, FPS, etc.
 --- g             - Toggle GUI display of video on/off
 --- P             - Toggle Perturbation mode on/off
+--- i             - Toggle invert image (use for white mice)
 """
     
     def getSettings(self):
@@ -361,10 +365,21 @@ Notes: %s
             # Need to set ROI size to that of these images:
             testfr=self.getGrayImage()
             self.roipt1 = (1, 1)
-            self.roipt2 = (1+testfr.width,1+testfr.height)
+            self.roipt2 = (testfr.width+1,testfr.height+1)
             self.roirect = (self.roipt1[0],self.roipt1[1],self.roipt2[0]-self.roipt1[0],self.roipt2[1]-self.roipt1[1])
             self.currfr = 0
             
+    def makeROIimage(self):
+        # Uses ROI pts to allocate roiimage:
+        self.roisize = (self.roipt2[0]-self.roipt1[0],self.roipt2[1]-self.roipt1[1])
+        self.roirect = (self.roipt1[0],self.roipt1[1],self.roipt2[0]-self.roipt1[0],self.roipt2[1]-self.roipt1[1])
+        self.roiimg = cv.CreateImage(self.roisize, 8, 1)        
+        if self.debug:
+            print "roipt1",self.roipt1
+            print "roipt2",self.roipt2
+            print "roisize",self.roisize
+            print "roimg getsize",cv.GetSize(self.roiimg)
+    
     def getGrayImage(self):
         if type(self.camcap) is list:
             if self.currfr == (len(self.camcap)-1):
@@ -392,8 +407,12 @@ Notes: %s
         if newfr.channels is not 1:
             newbgfr = cv.CreateImage(cv.GetSize(newfr),8,1)
             cv.CvtColor(newfr,newbgfr,cv.CV_RGB2GRAY)
+            if self.invert:
+                cv.SubRS(newbgfr,cv.Scalar(255),newbgfr)
             return newbgfr
         else:
+            if self.invert:
+                cv.SubRS(newfr,cv.Scalar(255),newfr)
             return newfr
     
     def setupKalman(self):
@@ -608,7 +627,7 @@ Notes: %s
             self.keycallback = self.storeArea
             self.keybuf = ""
             self.keyinput = True
-        elif c == 'm': # Measure new animal area:
+        elif c == 'M': # Measure new animal area:
             if self.state == 'preview':
                 self.measureinput = not self.measureinput
             else:
@@ -670,13 +689,14 @@ Notes: %s
             if self.state == 'preview':
                 self.roiinput = not self.roiinput
         elif c == 'd':
+            # First check if we are given image sequence input, cannot display as only have ROIs
+            if self.imgs != "":
+                print "Cannot go into display mode given image sequence, only have ROIs"
+                return
             # if we are in idle go into display
-            # if we in tracking, stop and go into display
+            # if we are in other modes, ignore
             if self.state == "idle":
-                # Make image for ROI
-                self.roisize = (self.roipt2[0]-self.roipt1[0],self.roipt2[1]-self.roipt1[1])
-                self.roirect = (self.roipt1[0],self.roipt1[1],self.roipt2[0]-self.roipt1[0],self.roipt2[1]-self.roipt1[1])
-                self.roiimg = cv.CreateImage(self.roisize, 8, 1)
+                self.makeROIimage()
                 if self.camcap is None:
                     self.openCam()
                 # Not in useci mode, will grab full frame
@@ -700,18 +720,10 @@ Notes: %s
         elif c == 't':
             # Go into tracking mode
             if self.state == "idle":
-                #try:
+                # Difference order from display!
                 if self.camcap is None:
                     self.openCam() # This also adjusts ROI if in files mode
-                    
-                # Make image for ROI
-                print self.roipt1
-                print self.roipt2
-                self.roisize = (self.roipt2[0]-self.roipt1[0],self.roipt2[1]-self.roipt1[1])
-                self.roirect = (self.roipt1[0],self.roipt1[1],self.roipt2[0]-self.roipt1[0],self.roipt2[1]-self.roipt1[1])
-                self.roiimg = cv.CreateImage(self.roisize, 8, 1)
-                print self.roisize
-                print cv.GetSize(self.roiimg)
+                self.makeROIimage()
                 self.filtimg = cv.CreateImage(self.roisize, 8, 1)
                 self.storage = cv.CreateMemStorage(0)
                 #print cv.GetSize(self.roiimg)
@@ -733,6 +745,8 @@ Notes: %s
                 self.trackstarttime = time.time()
                 self.lasttrack=-np.inf
                 self.state = "tracking"
+                if sys.platform == 'darwin':
+                    os.system('''/usr/bin/osascript -e 'tell app "Finder" to set frontmost of process "Python" to true' ''')
             elif self.state == "tracking":
                 # Switch back to idle
                 cv.DestroyWindow(self.prevwn)
@@ -750,10 +764,7 @@ Notes: %s
             # Go into feedback control mode
             if self.state == "idle":              
                 # Get tracking setup
-                # Allocate images and tracking structures for ROI
-                self.roisize = (self.roipt2[0]-self.roipt1[0],self.roipt2[1]-self.roipt1[1])
-                self.roirect = (self.roipt1[0],self.roipt1[1],self.roipt2[0]-self.roipt1[0],self.roipt2[1]-self.roipt1[1])
-                self.roiimg = cv.CreateImage(self.roisize, 8, 1)
+                self.makeROIimage()
                 self.filtimg = cv.CreateImage(self.roisize, 8, 1)
                 self.storage = cv.CreateMemStorage(0)
                 # Start camera
@@ -809,11 +820,18 @@ Notes: %s
                     self.logging = False
                     sys.stderr.write("Logging mode OFF\n")                    
         elif c == 'b':
-            if self.state == "feedback":
+            if self.state == "feedback" or self.state == "manual":
                 self.behavtrig = not self.behavtrig
                 print "Behavioural trigger set to %s." % self.behavtrig
             else:
-                print "Cant turn off or off behavioural trigger except in feedback mode."
+                print "Cant turn off or off behavioural trigger except in feedback or manual mode."
+        elif c == 'i':
+            if not self.invert:
+                self.invert = True
+                print "Invert image set to True"
+            else:
+                self.invert = False
+                print "Invert image set to False"
         elif c == 'P':
             if self.state == "feedback":
                 self.perturb = not self.perturb
@@ -875,8 +893,12 @@ Notes: %s
                 self.tsinter.runstop(True,self.verbose)
                 self.trunning = True
         elif c in '0123456789':
+            # Note this does zero checking of state! Will work in manual mode.
             self.tsinter.setspd(int(c)*10,self.verbose)
+            self.lastsercmdtime=time.time()
             self.tmspd = int(c)*10
+            if self.logging:
+                self.logSerCmd((self.lastsercmdtime-self.logstarttime,self.lastsercmdtime,self.tmspd))
         elif c == 'S':
             d = shelve.open("shelf")
             d["trackdata"] = self.trackdata[0:self.framenum,:]
@@ -1161,7 +1183,7 @@ Notes: %s
 
     def logPert(self):
         # Store latest serial command in log file: 'time','utctime','startbehav','perttime','pertendtime'
-        self.serf.write( '%.6f,%05.6f,%05.6f,%05.6f,%05.6f,%05.6f\n' % (self.lasttracktime-self.logstarttime, self.lasttracktime,self.startBehaviour, self.perttime, self.pertendtime )
+        self.serf.write( '%.6f,%05.6f,%05.6f,%05.6f,%05.6f,%05.6f\n' % (self.lasttracktime-self.logstarttime, self.lasttracktime, self.startBehaviour, self.perttime, self.pertendtime ))
 
     def stopLogging(self):
         self.logging=False
@@ -1199,6 +1221,8 @@ Notes: %s
                         if self.verbose:
                             print 1.0/dt
                         self.updateTracker()
+                        if self.behavtrig:
+                            self.behaviorTriggerHS()
                 elif self.state == "feedback":
                     now=time.time()
                     dt=now-self.lastfeedback
@@ -1284,6 +1308,13 @@ def main():
         default = False
     )
 
+    parser.add_option("-d", "--debug",
+        dest = "debug",
+        action = "store_true",
+        help = "If set outputs diagnostic and debug messages",
+        default = False
+    )
+
     parser.add_option("--noci",
         dest = "noci",
         action = "store_true",
@@ -1335,7 +1366,7 @@ def main():
             exec("import motmot.cam_iface.cam_iface_ctypes as cam_iface") in globals()
     
     # Create the tmilltracker, and run it
-    tt = TmillTracker(haveserial,options.noci,options.imgs)
+    tt = TmillTracker(haveserial,options.noci,options.imgs,options.debug)
     if options.initial:
         tt.getInitial()
     sys.stderr.write(tt.get_help_text())
