@@ -175,7 +175,12 @@ class TmillTracker():
         self.setpt = 0.5 # Set point for controller -- 50% of treadmill
         self.areapct = 0.7 # Take contours with area +- 70% around given value e.g. 2200. High value for robustness.       
         self.area = 2200
-        self.kp = 0.2 # Position gain at 15 fps. Note that will be scaled by actual framerate used. Works well at 30 fps with gui on.
+        # BETTER SETTINGS FOR MOUSE 09/05/2013 kp = 0.35, kd=20
+        # at kp=0.5, kd=10, mouse was getting far up belt before it caught them
+        # at kp = 0.35, kd=15, better, smooth ramp up with mouse, still getting far forward though and then fast catch
+        # Previous PD settings were driving current mouse to back of treadmill, reducing p gait slightly to compensate. Previous settings kp=0.35, kd=15
+        # Just lower p gain to 0.25 and leave d gain at 15 and see how we do.
+        self.kp = 0.25 # Position gain at 15 fps. Not that will be scaled by actual framerate used. Works well at 30 fps with gui on. Jumpy at 150 fps.
         self.kd = 10 # See below
         self.tmillwidth = 410*0.001 # 41 cm belt, see specs of Panlab.
         if(d.has_key("tmillwidth")):
@@ -195,6 +200,13 @@ class TmillTracker():
         self.framewriting = False
         self.behavtrig = False
         self.perturb = False
+        self.applyingpert = False
+        self.pertdur = 0.2          # Perturbation lasts 200ms, down and up ramps
+        self.pertfrac = 0.5         # Perturbation loses 100% of current speed
+        self.pertresponsedur = 0.75  # Seconds to record after perturbation finishes.
+        self.pertvidsavetime = -1
+        self.pertwait = 10.0
+        self.pertendtime = -np.Inf
         self.guion = True
         self.tmspd = 0
         self.pa = cv.CreateMat(1,1, cv.CV_32FC2)
@@ -215,6 +227,7 @@ class TmillTracker():
         self.endBehavior = -1
         self.animspd = 0.0
         self.invert = False
+        self.capsecs = 2.0
         # Give lastgoodtracktime a value because np.nan implies have a good track.
         # Setting to a time will cause slowdown if we have no track.
         self.lastgoodtracktime = time.time()
@@ -234,6 +247,7 @@ class TmillTracker():
 --- p             - Toggle single preview image capture from camera
 --- u             - Update preview image
 --- o             - Set ROI for treadmill video tracker on preview image
+                  - NOTE: Click top left first then drag to bottom right and release
 --- d             - Display live video feed
 --- c             - Toggle control treadmill
 --- r             - Toggle treadmill run/stop
@@ -252,6 +266,7 @@ class TmillTracker():
 --- V             - Log video to file
 --- F             - Log video Frames
 --- b             - Behaviour trigger (High speed video record)
+--- <return>      - Store last 2 seconds of HSV (in tracking mode only)
 --- e             - Tell HS camera code to Exit
 --- S             - Save current trackdata to shelf
 --- O             - Toggle Overlay on images on screen and disk: speed, FPS, etc.
@@ -596,11 +611,11 @@ Notes: %s
         
     def handleInput(self,c):
         if self.verbose:
-            sys.stderr.write('Got char: %c\n' % c )
+            sys.stderr.write('Got char: ordinal %d\n' % ord(c) )
         if c == '\x1b': # x1b is ESC - Always check this first for quick exit
             self.alive = False
         elif self.keyinput == True:
-            if c == '\x0A': # Carriage return: 
+            if c == '\x0A': # This is ordinal 10 = Line Feed. Get these from terminal carriage return input.
                 # Then call the function stored in self.keycallback to process the buffer
                 self.keycallback()
                 self.keyinput = False
@@ -820,11 +835,28 @@ Notes: %s
                     self.logging = False
                     sys.stderr.write("Logging mode OFF\n")                    
         elif c == 'b':
-            if self.state == "feedback" or self.state == "manual":
+            if self.state == "feedback" or self.state == "tracking":
                 self.behavtrig = not self.behavtrig
                 print "Behavioural trigger set to %s." % self.behavtrig
             else:
-                print "Cant turn off or off behavioural trigger except in feedback or manual mode."
+                print "Cant turn off or off behavioural trigger except in feedback or tracking mode."
+        elif c == '\x0D' or c == '\x0A': # Carriage return = 0x0D = 13: note that these come from OpenCV window on hitting enter, whereasa 0x0A == 10 comes from terminal enter. User may hit enter into either.
+            # If we are in tracking mode, and user hits carriage return, save X secs of high speed video
+            if self.state == "tracking":
+                #send packet to trigger camera to capture last capsecs seconds
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                try:
+                    now = time.time()
+                    print "Sending request to HSV machine store %d seconds up to present time." % (self.capsecs)
+                    s.connect((self.host, self.port))
+                    s.send("%.6f %.6f" % (now-self.capsecs,now) )
+                except:
+                    print "Error connecting"
+                finally:
+                    print 'closing socket!'
+                    s.close()
+            else:
+                print "<enter> stores high speed video in tracking mode only"
         elif c == 'i':
             if not self.invert:
                 self.invert = True
@@ -839,7 +871,7 @@ Notes: %s
             else:
                 print "Cant turn off or off PERTURBATION mode except in feedback mode."                        
         elif c == 'e':
-            #send packet to trigger camera (should this be its own method?)
+            # send packet to tell hsv camera code to exit
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 s.connect((self.host, self.port))
@@ -893,8 +925,9 @@ Notes: %s
                 self.tsinter.runstop(True,self.verbose)
                 self.trunning = True
         elif c in '0123456789':
-            # Note this does zero checking of state! Will work in manual mode.
-            self.tsinter.setspd(int(c)*10,self.verbose)
+            # Note this does zero checking of state! Will work in tracking mode.
+            if self.haveserial:
+                self.tsinter.setspd(int(c)*10,self.verbose)
             self.lastsercmdtime=time.time()
             self.tmspd = int(c)*10
             if self.logging:
@@ -1053,7 +1086,7 @@ Notes: %s
             self.startBehavior = -1
             self.endBehavior = -1
     
-    def perturbVidHandler():
+    def perturbVidHandler(self):
         '''
         How will perturbations work? Handle separate vid/feedback loops.
         
@@ -1082,7 +1115,7 @@ Notes: %s
                     # Just transitioned into valid speed range
                     self.startBehavior = self.lasttracktime
                 # Have we been in good behaviour long enough to trigger?
-                if((self.lasttracktime - self.startBehavior) > 2.0): # seconds
+                if( ((self.lasttracktime - self.startBehavior) > 1.0) and ((self.lasttracktime-(self.pertendtime+self.pertresponsedur))>self.pertwait) ): # seconds
                     print 'PERTURBING: Valid behaviour sequence for:', self.lasttracktime - self.startBehavior, 'seconds'
                     self.perttime=self.lasttracktime
                     # Compute slope of speed drop reqd to drop X pct of speed in pertdur/2
@@ -1094,48 +1127,67 @@ Notes: %s
                 self.startBehavior = -1
         else:
             # We ARE applyingpert: check if finished, if done, send command to save video
-            if (self.lasttracktime - self.perttime) > self.pertdur:
-                # Perturbation should have finished.
-                # Set end time:
-                self.pertendtime=self.lasttracktime
-                # Reset state then send logging command to HSV:
-                self.applyingpert=False
-                # Log pert to file. Start behav, pert start time, pert end time
-                print "Perturbation duration complete: would log to file here. Sending VID LOG COMMAND:"
-                self.logPert()
-                #send packet to trigger camera (this should be its own method)
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                try:
-                    s.connect((self.host, self.port))
-                    s.send("%.6f %.6f" % (self.startBehavior,self.pertendtime) )
-                    #data = s.recv(1024)
-                    #print 'Received', repr(data)
-                except:
-                    print "Error connecting"
-                finally:
-                    print 'Closing socket!'
-                    s.close()
-                self.startBehavior = -1
+            if (self.pertvidsavetime == -1):
+                if ((self.lasttracktime - self.perttime) > self.pertdur):
+                    # Perturbation should have finished.
+                    # Set end time:
+                    self.pertendtime=self.lasttracktime
+                    self.pertvidsavetime = self.pertendtime + self.pertresponsedur
+                    # Log pert to file. Start behav, pert start time, pert end time
+                    print "Perturbation duration complete: would log to file here. Sending VID LOG COMMAND:"
+                    if self.logging:
+                        self.logPert()
+                    # Put treadmill speed back:
+                    self.tmspd = self.pertstartspeed
+            else:
+                if (self.lasttracktime-self.pertendtime) > self.pertresponsedur:
+                    # Reset state then send logging command to HSV:
+                    self.applyingpert=False
+                    #send packet to trigger camera (this should be its own method)
+                    print "Response duration elapsed, sending save command"
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    try:
+                        s.connect((self.host, self.port))
+                        s.send("%.6f %.6f" % (self.startBehavior, self.pertvidsavetime) )
+                        #data = s.recv(1024)
+                        #print 'Received', repr(data)
+                    except:
+                        print "Error connecting"
+                    finally:
+                        print 'Closing socket!'
+                        s.close()
+                    self.pertvidsavetime = -1
+                    self.startBehavior = -1
             
-    def perturbSerialHandler():
+    def perturbSerialHandler(self):
         '''
         Take over serial handling from feedback control. Drop speed down linearly by
         pct percent in t secs, then back up.
         
         Requirements: Log all changes to the serial commands log file.
         Allow emergency stopping.
-        '''        
-        # Only called if self.applypert:
-        if (self.lasttracktime-self.perttime)<(self.pertdur/2.0):
-            # In the down time region: (pertslope is negative)
-            newspd = self.pertstartspeed + (self.lasttracktime - self.perttime)*self.pertslope
-        elif (self.lasttracktime-self.perttime)>(self.pertdur):
-            # Done - pert mode will be cancelled soon.
-            newspd = self.pertstartspeed
+        '''
+        if 0:
+            # Only called if self.applypert:
+            if (self.lasttracktime-self.perttime)<(self.pertdur/2.0):
+                # In the down time region: (pertslope is negative)
+                newspd = self.pertstartspeed + (self.lasttracktime - self.perttime)*self.pertslope
+            elif (self.lasttracktime-self.perttime)>(self.pertdur):
+                # Done - pert mode will be cancelled soon.
+                newspd = self.pertstartspeed
+            else:
+                # In the back up region:
+                newspd = self.pertstartspeed - (self.lasttracktime - (self.perttime+(self.pertdur/2.0)))*self.pertslope
+                if newspd > self.pertstartspeed:
+                    newspd = self.pertstartspeed
         else:
-            # In the back up region:
-            newspd = self.pertstartspeed - (self.lasttracktime - (self.perttime+(self.pertdur/2.0)))*self.pertslope
-            if newspd > self.pertstartspeed:
+            if (self.lasttracktime-self.perttime)<=self.pertdur:
+                newspd = self.pertstartspeed * self.pertfrac
+                if self.verbose:
+                    print "perturb setting spd to -1 shoudl be ten? of these"
+            else:
+                if self.verbose:
+                    print "Out of perturb dur back to start speed"
                 newspd = self.pertstartspeed
         # Bounds checking done below
         return newspd
@@ -1183,7 +1235,10 @@ Notes: %s
 
     def logPert(self):
         # Store latest serial command in log file: 'time','utctime','startbehav','perttime','pertendtime'
-        self.serf.write( '%.6f,%05.6f,%05.6f,%05.6f,%05.6f,%05.6f\n' % (self.lasttracktime-self.logstarttime, self.lasttracktime, self.startBehaviour, self.perttime, self.pertendtime ))
+        self.pertfname = time.strftime("data/raw/tmilltrackerlog_%Y%m%d_%H%M%S_pert.csv",time.localtime(self.logstarttime))
+        self.pertf = open( self.pertfname, 'a' )
+        self.pertf.write( '%.6f,%05.6f,%05.6f,%05.6f,%05.6f\n' % (self.lasttracktime-self.logstarttime, self.lasttracktime,self.startBehavior, self.perttime, self.pertendtime) )
+        self.pertf.close()
 
     def stopLogging(self):
         self.logging=False
@@ -1206,6 +1261,8 @@ Notes: %s
                 if self.guion:
                     if self.cvwindow:
                         c = cv.WaitKey(1) % 0x100
+                        if self.verbose:
+                            print "Got key %s from window" % chr(c)
                         if c is not 255:
                             self.handleInput(chr(c))
                 if self.state == "display":
