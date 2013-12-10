@@ -209,6 +209,15 @@ class TmillTracker():
         self.pertendtime = -np.Inf
         self.guion = True
         self.tmspd = 0
+        # Load left and right bracket key speeds if stored
+        if(d.has_key("lbrk_spd")):
+            self.lbrk_spd = d["lbrk_spd"]
+        else:
+            self.lbrk_spd = 15
+        if(d.has_key("rbrk_spd")):
+            self.rbrk_spd = d["rbrk_spd"]
+        else:
+            self.rbrk_spd = 30
         self.pa = cv.CreateMat(1,1, cv.CV_32FC2)
         self.haveserial = haveserial
         self.fliplr = False
@@ -252,6 +261,8 @@ class TmillTracker():
 --- c             - Toggle control treadmill
 --- r             - Toggle treadmill run/stop
 --- 0-9           - Set treadmill speed 0 - 90 cm/s
+--- [, ]          - Set speed to preset values. Default [=15 cm/s, ]=30 cm/s
+--- shift-[, -]   - Set the preset speed value of these keys.  
 --- C             - Calibrate length scale
 --- a             - Calibrate animal size ellipse
 --- M             - Measure and set ellipse area
@@ -288,7 +299,9 @@ Animal num: %d
 Trial num: %d
 Weight: %3.3f
 Notes: %s
-""" % (self.roirect + (self.vidrate,self.serialrate,self.area,self.tmillwidth,self.overlay,self.animalnum,self.trialnum,self.weight,self.notes))
+Left bracket key speed: %d
+Right bracket key speed: %d
+""" % (self.roirect + (self.vidrate,self.serialrate,self.area,self.tmillwidth,self.overlay,self.animalnum,self.trialnum,self.weight,self.notes,self.lbrk_spd,self.rbrk_spd))
         
     def mouseHandler(self,event,x,y,flags,param):
         if self.roiinput:
@@ -565,6 +578,20 @@ Notes: %s
     def storeNotes(self):
         self.notes = str(self.keybuf)
         sys.stderr.write('\nSetting notes to %s\n' % self.notes )
+
+    def storeLeftBrkSpd(self):
+        self.lbrk_spd = int(self.keybuf)
+        sys.stderr.write('\nSetting left bracket key speed to %d, and saving settings.\n' % self.lbrk_spd )
+        d = shelve.open("shelf")
+        d["lbrk_spd"] = self.lbrk_spd
+        d.close()
+
+    def storeRightBrkSpd(self):
+        self.rbrk_spd = int(self.keybuf)
+        sys.stderr.write('\nSetting right bracket key speed to %d, and saving this setting.\n' % self.rbrk_spd )
+        d = shelve.open("shelf")
+        d["rbrk_spd"] = self.rbrk_spd
+        d.close()
     
     def makeTimeStampStr(self,epochtime):
         return time.strftime("%Y%m%d_%H%M%Sp",time.localtime(epochtime)) + ("%0.6f" % (epochtime % 1))[2:]
@@ -602,6 +629,20 @@ Notes: %s
         self.keycallback = self.storeNotes
         self.keybuf = ""
         self.keyinput = True
+
+    def getLbrkSpd(self):
+        sys.stderr.write('Old left bracket speed (cm/s): %d\n' % self.lbrk_spd )
+        sys.stderr.write("Enter new speed setting for left bracket key: ")
+        self.keycallback = self.storeLeftBrkSpd
+        self.keybuf = ""
+        self.keyinput = True
+
+    def getRbrkSpd(self):
+        sys.stderr.write('Old right bracket speed (cm/s): %d\n' % self.rbrk_spd )
+        sys.stderr.write("Enter new speed setting for right bracket key: ")
+        self.keycallback = self.storeRightBrkSpd
+        self.keybuf = ""
+        self.keyinput = True
         
     def getInitial(self):
         self.animalnum = int(raw_input('Enter animal number: '))
@@ -636,6 +677,12 @@ Notes: %s
             self.getWeight()
         elif c == 'N': # Input notes for this trial
             self.getNotes()
+        elif c =='{':
+            if self.state=="idle":
+                self.getLbrkSpd()
+        elif c =='}':
+            if self.state=="idle":
+                self.getRbrkSpd()
         elif c == 'a': # New animal ellipse area:
             sys.stderr.write('Old animal ellipse area: %f\n' % self.area )
             sys.stderr.write("New ellipse area:")
@@ -930,6 +977,18 @@ Notes: %s
                 self.tsinter.setspd(int(c)*10,self.verbose)
             self.lastsercmdtime=time.time()
             self.tmspd = int(c)*10
+            if self.logging:
+                self.logSerCmd((self.lastsercmdtime-self.logstarttime,self.lastsercmdtime,self.tmspd))
+        elif c in '['+']':
+            if c=='[':
+                spdset=self.lbrk_spd
+            else:
+                spdset=self.rbrk_spd
+            # Note this does zero checking of state! Will work in tracking mode.
+            if self.haveserial:
+                self.tsinter.setspd(int(spdset),self.verbose)
+            self.lastsercmdtime=time.time()
+            self.tmspd = int(spdset)
             if self.logging:
                 self.logSerCmd((self.lastsercmdtime-self.logstarttime,self.lastsercmdtime,self.tmspd))
         elif c == 'S':
