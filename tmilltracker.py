@@ -175,6 +175,9 @@ class TmillTracker():
         self.setpt = 0.5 # Set point for controller -- 50% of treadmill
         self.areapct = 0.7 # Take contours with area +- 70% around given value e.g. 2200. High value for robustness.       
         self.area = 2200
+        self.thresh = 70 # Threshold for contour finding, out of 255 for 8 bit images.
+        if d.has_key("thresh"):
+            self.thresh=d["thresh"]
         # BETTER SETTINGS FOR MOUSE 09/05/2013 kp = 0.35, kd=20
         # at kp=0.5, kd=10, mouse was getting far up belt before it caught them
         # at kp = 0.35, kd=15, better, smooth ramp up with mouse, still getting far forward though and then fast catch
@@ -257,6 +260,7 @@ class TmillTracker():
 --- u             - Update preview image
 --- o             - Set ROI for treadmill video tracker on preview image
                   - NOTE: Click top left first then drag to bottom right and release
+--- H             - Set threshold for finding contours: default = 70; range 0-255
 --- d             - Display live video feed
 --- c             - Toggle control treadmill
 --- r             - Toggle treadmill run/stop
@@ -293,6 +297,7 @@ ROI: (top: %d, left: %d, width %d, height %d)
 Video rate: %d
 Serial rate: %d
 Elipse area: %d
+Threshold for contour detection: %d
 Treadmill width calibration (meters): %f
 Overlay: %d
 Animal num: %d
@@ -301,7 +306,7 @@ Weight: %3.3f
 Notes: %s
 Left bracket key speed: %d
 Right bracket key speed: %d
-""" % (self.roirect + (self.vidrate,self.serialrate,self.area,self.tmillwidth,self.overlay,self.animalnum,self.trialnum,self.weight,self.notes,self.lbrk_spd,self.rbrk_spd))
+""" % (self.roirect + (self.vidrate,self.serialrate,self.area,self.thresh,self.tmillwidth,self.overlay,self.animalnum,self.trialnum,self.weight,self.notes,self.lbrk_spd,self.rbrk_spd))
         
     def mouseHandler(self,event,x,y,flags,param):
         if self.roiinput:
@@ -563,6 +568,14 @@ Right bracket key speed: %d
         self.area = float(self.keybuf)
         sys.stderr.write('\nSetting animal ellipse target area to %f\n' % self.area )
 
+    def storeThresh(self):
+        self.thresh = float(self.keybuf)
+        sys.stderr.write('\nSetting threshold for countour detection to %d\n' % self.thresh )
+        # Save new threshold
+        d = shelve.open("shelf")
+        d["thresh"] = self.thresh
+        d.close()
+
     def storeAnimalNum(self):
         self.animalnum = int(self.keybuf)
         sys.stderr.write('\nSetting animal number to %d\n' % self.animalnum )
@@ -600,6 +613,13 @@ Right bracket key speed: %d
         sys.stderr.write('Old treadmill width: %f meters\n' % self.tmillwidth )
         sys.stderr.write("New width of treadmill belt (ROI) in meters:")
         self.keycallback = self.storeLengthCal
+        self.keybuf = ""
+        self.keyinput = True
+
+    def getThresh(self):
+        sys.stderr.write('Old threshold: %d\n' % self.thresh )
+        sys.stderr.write("New threshold (0-255; default 70 for black mice on white bg): ")
+        self.keycallback = self.storeThresh
         self.keybuf = ""
         self.keyinput = True
         
@@ -689,6 +709,11 @@ Right bracket key speed: %d
             self.keycallback = self.storeArea
             self.keybuf = ""
             self.keyinput = True
+        elif c == 'H': # Threshold:
+            if self.state=="idle":
+                self.getThresh()
+            else:
+                sys.stderr.write("Can only set threshold in idle mode")
         elif c == 'M': # Measure new animal area:
             if self.state == 'preview':
                 self.measureinput = not self.measureinput
@@ -1036,7 +1061,7 @@ Right bracket key speed: %d
             cv.Copy(self.prevfr,self.roiimg)
         cv.Dilate(self.roiimg,self.filtimg,None,2)
         # Threshold for mouse with no shadow?
-        cv.Threshold(self.filtimg, self.filtimg, 70, 70, cv.CV_THRESH_BINARY_INV)
+        cv.Threshold(self.filtimg, self.filtimg, self.thresh, self.thresh, cv.CV_THRESH_BINARY_INV)
         #cv.Threshold(self.filtimg, self.filtimg, 150, 150, cv.CV_THRESH_BINARY)
         contours = cv.FindContours(self.filtimg,self.storage,cv.CV_RETR_LIST,cv.CV_CHAIN_APPROX_SIMPLE,(0,0))
         #gray = cv.CV_RGB(100, 0, 0)
