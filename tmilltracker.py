@@ -175,6 +175,9 @@ class TmillTracker():
         self.setpt = 0.5 # Set point for controller -- 50% of treadmill
         self.areapct = 0.7 # Take contours with area +- 70% around given value e.g. 2200. High value for robustness.       
         self.area = 2200
+        self.thresh = 70 # Threshold for contour finding, out of 255 for 8 bit images.
+        if d.has_key("thresh"):
+            self.thresh=d["thresh"]
         # BETTER SETTINGS FOR MOUSE 09/05/2013 kp = 0.35, kd=20
         # at kp=0.5, kd=10, mouse was getting far up belt before it caught them
         # at kp = 0.35, kd=15, better, smooth ramp up with mouse, still getting far forward though and then fast catch
@@ -209,6 +212,15 @@ class TmillTracker():
         self.pertendtime = -np.Inf
         self.guion = True
         self.tmspd = 0
+        # Load left and right bracket key speeds if stored
+        if(d.has_key("lbrk_spd")):
+            self.lbrk_spd = d["lbrk_spd"]
+        else:
+            self.lbrk_spd = 15
+        if(d.has_key("rbrk_spd")):
+            self.rbrk_spd = d["rbrk_spd"]
+        else:
+            self.rbrk_spd = 30
         self.pa = cv.CreateMat(1,1, cv.CV_32FC2)
         self.haveserial = haveserial
         self.fliplr = False
@@ -248,10 +260,13 @@ class TmillTracker():
 --- u             - Update preview image
 --- o             - Set ROI for treadmill video tracker on preview image
                   - NOTE: Click top left first then drag to bottom right and release
+--- H             - Set threshold for finding contours: default = 70; range 0-255
 --- d             - Display live video feed
 --- c             - Toggle control treadmill
 --- r             - Toggle treadmill run/stop
 --- 0-9           - Set treadmill speed 0 - 90 cm/s
+--- [, ]          - Set speed to preset values. Default [=15 cm/s, ]=30 cm/s
+--- shift-[, -]   - Set the preset speed value of these keys.  
 --- C             - Calibrate length scale
 --- a             - Calibrate animal size ellipse
 --- M             - Measure and set ellipse area
@@ -282,13 +297,16 @@ ROI: (top: %d, left: %d, width %d, height %d)
 Video rate: %d
 Serial rate: %d
 Elipse area: %d
+Threshold for contour detection: %d
 Treadmill width calibration (meters): %f
 Overlay: %d
 Animal num: %d
 Trial num: %d
 Weight: %3.3f
 Notes: %s
-""" % (self.roirect + (self.vidrate,self.serialrate,self.area,self.tmillwidth,self.overlay,self.animalnum,self.trialnum,self.weight,self.notes))
+Left bracket key speed: %d
+Right bracket key speed: %d
+""" % (self.roirect + (self.vidrate,self.serialrate,self.area,self.thresh,self.tmillwidth,self.overlay,self.animalnum,self.trialnum,self.weight,self.notes,self.lbrk_spd,self.rbrk_spd))
         
     def mouseHandler(self,event,x,y,flags,param):
         if self.roiinput:
@@ -550,6 +568,14 @@ Notes: %s
         self.area = float(self.keybuf)
         sys.stderr.write('\nSetting animal ellipse target area to %f\n' % self.area )
 
+    def storeThresh(self):
+        self.thresh = float(self.keybuf)
+        sys.stderr.write('\nSetting threshold for countour detection to %d\n' % self.thresh )
+        # Save new threshold
+        d = shelve.open("shelf")
+        d["thresh"] = self.thresh
+        d.close()
+
     def storeAnimalNum(self):
         self.animalnum = int(self.keybuf)
         sys.stderr.write('\nSetting animal number to %d\n' % self.animalnum )
@@ -565,6 +591,20 @@ Notes: %s
     def storeNotes(self):
         self.notes = str(self.keybuf)
         sys.stderr.write('\nSetting notes to %s\n' % self.notes )
+
+    def storeLeftBrkSpd(self):
+        self.lbrk_spd = int(self.keybuf)
+        sys.stderr.write('\nSetting left bracket key speed to %d, and saving settings.\n' % self.lbrk_spd )
+        d = shelve.open("shelf")
+        d["lbrk_spd"] = self.lbrk_spd
+        d.close()
+
+    def storeRightBrkSpd(self):
+        self.rbrk_spd = int(self.keybuf)
+        sys.stderr.write('\nSetting right bracket key speed to %d, and saving this setting.\n' % self.rbrk_spd )
+        d = shelve.open("shelf")
+        d["rbrk_spd"] = self.rbrk_spd
+        d.close()
     
     def makeTimeStampStr(self,epochtime):
         return time.strftime("%Y%m%d_%H%M%Sp",time.localtime(epochtime)) + ("%0.6f" % (epochtime % 1))[2:]
@@ -573,6 +613,13 @@ Notes: %s
         sys.stderr.write('Old treadmill width: %f meters\n' % self.tmillwidth )
         sys.stderr.write("New width of treadmill belt (ROI) in meters:")
         self.keycallback = self.storeLengthCal
+        self.keybuf = ""
+        self.keyinput = True
+
+    def getThresh(self):
+        sys.stderr.write('Old threshold: %d\n' % self.thresh )
+        sys.stderr.write("New threshold (0-255; default 70 for black mice on white bg): ")
+        self.keycallback = self.storeThresh
         self.keybuf = ""
         self.keyinput = True
         
@@ -600,6 +647,20 @@ Notes: %s
         sys.stderr.write('Old notes: %s\n' % self.notes )
         sys.stderr.write("Enter new trial notes: ")
         self.keycallback = self.storeNotes
+        self.keybuf = ""
+        self.keyinput = True
+
+    def getLbrkSpd(self):
+        sys.stderr.write('Old left bracket speed (cm/s): %d\n' % self.lbrk_spd )
+        sys.stderr.write("Enter new speed setting for left bracket key: ")
+        self.keycallback = self.storeLeftBrkSpd
+        self.keybuf = ""
+        self.keyinput = True
+
+    def getRbrkSpd(self):
+        sys.stderr.write('Old right bracket speed (cm/s): %d\n' % self.rbrk_spd )
+        sys.stderr.write("Enter new speed setting for right bracket key: ")
+        self.keycallback = self.storeRightBrkSpd
         self.keybuf = ""
         self.keyinput = True
         
@@ -636,12 +697,23 @@ Notes: %s
             self.getWeight()
         elif c == 'N': # Input notes for this trial
             self.getNotes()
+        elif c =='{':
+            if self.state=="idle":
+                self.getLbrkSpd()
+        elif c =='}':
+            if self.state=="idle":
+                self.getRbrkSpd()
         elif c == 'a': # New animal ellipse area:
             sys.stderr.write('Old animal ellipse area: %f\n' % self.area )
             sys.stderr.write("New ellipse area:")
             self.keycallback = self.storeArea
             self.keybuf = ""
             self.keyinput = True
+        elif c == 'H': # Threshold:
+            if self.state=="idle":
+                self.getThresh()
+            else:
+                sys.stderr.write("Can only set threshold in idle mode")
         elif c == 'M': # Measure new animal area:
             if self.state == 'preview':
                 self.measureinput = not self.measureinput
@@ -932,6 +1004,18 @@ Notes: %s
             self.tmspd = int(c)*10
             if self.logging:
                 self.logSerCmd((self.lastsercmdtime-self.logstarttime,self.lastsercmdtime,self.tmspd))
+        elif c in '['+']':
+            if c=='[':
+                spdset=self.lbrk_spd
+            else:
+                spdset=self.rbrk_spd
+            # Note this does zero checking of state! Will work in tracking mode.
+            if self.haveserial:
+                self.tsinter.setspd(int(spdset),self.verbose)
+            self.lastsercmdtime=time.time()
+            self.tmspd = int(spdset)
+            if self.logging:
+                self.logSerCmd((self.lastsercmdtime-self.logstarttime,self.lastsercmdtime,self.tmspd))
         elif c == 'S':
             d = shelve.open("shelf")
             d["trackdata"] = self.trackdata[0:self.framenum,:]
@@ -977,7 +1061,7 @@ Notes: %s
             cv.Copy(self.prevfr,self.roiimg)
         cv.Dilate(self.roiimg,self.filtimg,None,2)
         # Threshold for mouse with no shadow?
-        cv.Threshold(self.filtimg, self.filtimg, 70, 70, cv.CV_THRESH_BINARY_INV)
+        cv.Threshold(self.filtimg, self.filtimg, self.thresh, self.thresh, cv.CV_THRESH_BINARY_INV)
         #cv.Threshold(self.filtimg, self.filtimg, 150, 150, cv.CV_THRESH_BINARY)
         contours = cv.FindContours(self.filtimg,self.storage,cv.CV_RETR_LIST,cv.CV_CHAIN_APPROX_SIMPLE,(0,0))
         #gray = cv.CV_RGB(100, 0, 0)
