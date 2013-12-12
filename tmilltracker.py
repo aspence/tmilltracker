@@ -227,7 +227,7 @@ class TmillTracker():
         self.endBehavior = -1
         self.animspd = 0.0
         self.invert = False
-        self.capsecs = 2.0
+        self.capsecs = 5.0
         # Give lastgoodtracktime a value because np.nan implies have a good track.
         # Setting to a time will cause slowdown if we have no track.
         self.lastgoodtracktime = time.time()
@@ -842,7 +842,7 @@ Notes: %s
                 print "Cant turn off or off behavioural trigger except in feedback or tracking mode."
         elif c == '\x0D' or c == '\x0A': # Carriage return = 0x0D = 13: note that these come from OpenCV window on hitting enter, whereasa 0x0A == 10 comes from terminal enter. User may hit enter into either.
             # If we are in tracking mode, and user hits carriage return, save X secs of high speed video
-            if self.state == "tracking":
+            if self.state == "tracking" or self.state == "feedback":
                 #send packet to trigger camera to capture last capsecs seconds
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 try:
