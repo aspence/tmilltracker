@@ -1488,6 +1488,10 @@ def main():
     except serial.SerialException, e:
         sys.stderr.write("Could not open port %r: %s\n" % (0, e))
         haveserial = False
+    except:
+        sys.stderr.write("Non-serial exception in creating serial interface.\n")
+        print "Unexpected error:", sys.exc_info()[0]
+        haveserial = False
 
     if haveserial and not options.quiet:
         sys.stderr.write('=== TmillSerialInterface on %s: %d,%s,%s,%s ===\n' % (
