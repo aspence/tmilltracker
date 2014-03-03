@@ -184,7 +184,7 @@ class TmillTracker():
         # Previous PD settings were driving current mouse to back of treadmill, reducing p gait slightly to compensate. Previous settings kp=0.35, kd=15
         # Just lower p gain to 0.25 and leave d gain at 15 and see how we do.
         self.kp = 0.25 # Position gain at 15 fps. Not that will be scaled by actual framerate used. Works well at 30 fps with gui on. Jumpy at 150 fps.
-        self.kd = 10 # See below
+        self.kd = 15 # See below
         self.tmillwidth = 410*0.001 # 41 cm belt, see specs of Panlab.
         if(d.has_key("tmillwidth")):
             self.tmillwidth = d["tmillwidth"]
@@ -239,7 +239,7 @@ class TmillTracker():
         self.endBehavior = -1
         self.animspd = 0.0
         self.invert = False
-        self.capsecs = 5.0
+        self.capsecs = 1.0
         # Give lastgoodtracktime a value because np.nan implies have a good track.
         # Setting to a time will cause slowdown if we have no track.
         self.lastgoodtracktime = time.time()
@@ -1146,7 +1146,7 @@ Right bracket key speed: %d
         # If animal is within right range, track length of range, 
         # then send trigger over tcp
         # FIXME: Use Kalman speed!
-        if(self.animspd > 0.25 and self.animspd < 0.45):
+        if(self.animspd > 0.25 and self.animspd < 0.95):
             if(self.startBehavior == -1):
                 self.startBehavior = self.lasttracktime
             else:
@@ -1193,7 +1193,7 @@ Right bracket key speed: %d
             # If animal is within right range, for required time span, 
             # then apply speed perturbation.
             # FIXME: Should be based on Kalman speed!
-            if(self.animspd > 0.25 and self.animspd < 0.45):
+            if(self.animspd > 0.25 and self.animspd < 0.5):
                 # Did we just enter good speed? If so note this:
                 if(self.startBehavior == -1):
                     # Just transitioned into valid speed range
