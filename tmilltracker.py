@@ -954,6 +954,19 @@ Right bracket key speed: %d
                 print "Error connecting"
             finally:
                 s.close()            
+        # =========== NEW CODE HERE ===========
+        elif c == 'm':
+            # send packet to tell hsv camera code to toggle streaming to disk
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.connect((self.host, self.port))
+                s.send("togglestreaming")
+                data = s.recv(1024)
+                print 'Received', repr(data)
+            except:
+                print "Error connecting"
+            finally:
+                s.close()          
         elif c == 'V':
             if self.state == "feedback":
                 if not self.vidwriting:
@@ -1487,6 +1500,10 @@ def main():
         haveserial = True
     except serial.SerialException, e:
         sys.stderr.write("Could not open port %r: %s\n" % (0, e))
+        haveserial = False
+    except:
+        sys.stderr.write("Non-serial exception in creating serial interface.\n")
+        print "Unexpected error:", sys.exc_info()[0]
         haveserial = False
 
     if haveserial and not options.quiet:
